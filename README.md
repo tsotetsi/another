@@ -32,6 +32,9 @@ Grab the latest release for your platform:
 ## Features
 
 - Real-time screen mirroring via H.264/H.265 decoding
+- Adaptive video bitrate that adjusts in real-time based on screen activity
+- Macros -- record, replay, import, export, and rename device interactions
+- Device nicknames -- give your devices custom names
 - WiFi mirroring -- go wireless with one click
 - Device audio forwarding (Android 11+)
 - Screen recording (saves as .webm)
@@ -105,6 +108,11 @@ npx skills add Zfinix/another@another-android
 | another_wifi_connect | Connect to device by IP |
 | another_wifi_disconnect | Disconnect WiFi device |
 | another_get_device_ip | Get device WiFi IP address |
+| another_macro_record | Start recording a macro |
+| another_macro_stop | Stop recording a macro |
+| another_macro_play | Play a recorded macro |
+| another_macro_list | List all macros |
+| another_macro_delete | Delete a macro |
 
 ## Keyboard Shortcuts
 
@@ -119,6 +127,7 @@ npx skills add Zfinix/another@another-android
 | `⌘B` | Back |
 | `⌘R` | Recent Apps |
 | `⌘P` | Power |
+| `⌘⇧M` | Record / Stop Macro |
 | `⌘D` | Disconnect |
 | `⌘T` | Toggle Theme |
 | `⌘,` | Settings |
