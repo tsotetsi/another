@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 another-core = { path = "../crates/another-core" }
 another-mcp = { path = "../crates/another-mcp" }
 tokio-util = "0.7"

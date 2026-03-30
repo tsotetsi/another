@@ -1,9 +1,11 @@
-use another_core::{adb, control, scrcpy};
+use another_core::{adb, control, macro_engine, scrcpy};
 use another_core::scrcpy::StreamSettings;
 use crate::audio::{self, AudioHandle};
 use crate::state::{AppState, ScrcpySession};
 use crate::video::{self, FrameEvent};
 use base64::Engine;
+use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
@@ -84,8 +86,14 @@ pub async fn connect_device(
     let session_arc = state.session.clone();
     let serial_clone = serial.clone();
 
+    let video_codec = if settings.video_codec == "h265" {
+        video::VideoCodec::H265
+    } else {
+        video::VideoCodec::H264
+    };
+
     tokio::spawn(async move {
-        video::stream_video(streams.video_socket, on_frame, shutdown.clone()).await;
+        video::stream_video(streams.video_socket, on_frame, shutdown.clone(), video_codec).await;
         scrcpy::stop_server(&serial_clone, port).await;
         let _ = server_process.kill().await;
         let mut s = session_arc.lock().await;
@@ -218,6 +226,237 @@ pub async fn press_button(button: String, state: State<'_, AppState>) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     control::inject_keycode(&session.control_socket, "up", keycode, 0, 0)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn wake_screen(state: State<'_, AppState>) -> Result<(), String> {
+    let session = state.session.lock().await;
+    let session = session.as_ref().ok_or("Not connected")?;
+
+    let is_on = adb::shell(&session.device_serial, "dumpsys power | grep 'Display Power'")
+        .await
+        .map_err(|e| e.to_string())?
+        .wait_with_output()
+        .await
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("state=ON"))
+        .unwrap_or(true);
+
+    if !is_on {
+        control::inject_keycode(
+            &session.control_socket,
+            "down",
+            control::KEYCODE_WAKEUP,
+            0,
+            0,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        control::inject_keycode(
+            &session.control_socket,
+            "up",
+            control::KEYCODE_WAKEUP,
+            0,
+            0,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn play_macro(
+    events: Vec<macro_engine::TimedEvent>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (socket, sw, sh) = {
+        let session = state.session.lock().await;
+        let session = session.as_ref().ok_or("Not connected")?;
+        (
+            session.control_socket.clone(),
+            session.screen_width,
+            session.screen_height,
+        )
+    };
+    macro_engine::play_events(&events, &socket, sw, sh)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn macro_path(dir: &str, name: &str) -> PathBuf {
+    PathBuf::from(dir).join(format!("{}.json", sanitize_filename(name)))
+}
+
+#[derive(Serialize)]
+pub struct MacroInfo {
+    pub name: String,
+    pub event_count: usize,
+}
+
+#[tauri::command]
+pub async fn get_default_macros_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("macros");
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn list_macro_files(dir: String) -> Result<Vec<MacroInfo>, String> {
+    let path = PathBuf::from(&dir);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let order_path = path.join("_order.json");
+    let order: Vec<String> = if order_path.exists() {
+        let data = tokio::fs::read_to_string(&order_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let mut entries = tokio::fs::read_dir(&path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut macros: Vec<MacroInfo> = Vec::new();
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let fname = entry.file_name().to_string_lossy().to_string();
+        if !fname.ends_with(".json") || fname == "_order.json" {
+            continue;
+        }
+        let data = match tokio::fs::read_to_string(entry.path()).await {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let m: macro_engine::Macro = match serde_json::from_str(&data) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        macros.push(MacroInfo {
+            name: m.name,
+            event_count: m.events.len(),
+        });
+    }
+
+    if !order.is_empty() {
+        macros.sort_by_key(|m| {
+            order
+                .iter()
+                .position(|n| n == &m.name)
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    Ok(macros)
+}
+
+#[tauri::command]
+pub async fn load_macro_file(
+    dir: String,
+    name: String,
+) -> Result<macro_engine::Macro, String> {
+    let path = macro_path(&dir, &name);
+    let data = tokio::fs::read_to_string(&path)
+        .await
+        .map_err(|e| format!("Failed to read macro: {}", e))?;
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse macro: {}", e))
+}
+
+#[tauri::command]
+pub async fn save_macro_file(
+    dir: String,
+    macro_data: macro_engine::Macro,
+) -> Result<(), String> {
+    let path = PathBuf::from(&dir);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let file_path = macro_path(&dir, &macro_data.name);
+    let json = serde_json::to_string_pretty(&macro_data).map_err(|e| e.to_string())?;
+    tokio::fs::write(&file_path, json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_macro_file(dir: String, name: String) -> Result<(), String> {
+    let path = macro_path(&dir, &name);
+    if path.exists() {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_macro_file(
+    dir: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let old_path = macro_path(&dir, &old_name);
+    if !old_path.exists() {
+        return Err(format!("Macro '{}' not found", old_name));
+    }
+
+    let data = tokio::fs::read_to_string(&old_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut m: macro_engine::Macro =
+        serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    m.name = new_name.clone();
+
+    let new_path = macro_path(&dir, &new_name);
+    let json = serde_json::to_string_pretty(&m).map_err(|e| e.to_string())?;
+    tokio::fs::write(&new_path, json)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if old_path != new_path {
+        tokio::fs::remove_file(&old_path)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_macros_order(dir: String, order: Vec<String>) -> Result<(), String> {
+    let path = PathBuf::from(&dir);
+    tokio::fs::create_dir_all(&path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let order_path = path.join("_order.json");
+    let json = serde_json::to_string_pretty(&order).map_err(|e| e.to_string())?;
+    tokio::fs::write(&order_path, json)
         .await
         .map_err(|e| e.to_string())
 }

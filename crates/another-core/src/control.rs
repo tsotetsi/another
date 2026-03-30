@@ -17,6 +17,7 @@ pub const KEYCODE_POWER: u32 = 26;
 pub const KEYCODE_VOLUME_UP: u32 = 24;
 pub const KEYCODE_VOLUME_DOWN: u32 = 25;
 pub const KEYCODE_APP_SWITCH: u32 = 187;
+pub const KEYCODE_WAKEUP: u32 = 224;
 
 const ACTION_DOWN: u8 = 0;
 const ACTION_UP: u8 = 1;

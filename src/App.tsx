@@ -1,15 +1,18 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Settings } from "./types";
+import type { Settings, Device } from "./types";
 import { PRESETS } from "./types";
 import { useTheme } from "./hooks/useTheme";
 import { useToasts } from "./hooks/useToasts";
 import { useDevices } from "./hooks/useDevices";
 import { useConnection } from "./hooks/useConnection";
+import { useAdaptiveBitrate } from "./hooks/useAdaptiveBitrate";
+import { useMacro } from "./hooks/useMacro";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { MirrorScreen } from "./components/MirrorScreen";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { CommandBar } from "./components/CommandBar";
+import { MacrosScreen } from "./components/MacrosScreen";
 import { ToastContainer } from "./components/ToastContainer";
 import "./App.css";
 
@@ -29,12 +32,14 @@ interface CommandDef {
 function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCommandBar, setShowCommandBar] = useState(false);
+  const [showMacros, setShowMacros] = useState(false);
   const [settings, setSettings] = useState<Settings>(PRESETS.balanced);
   const [activePreset, setActivePreset] = useState("balanced");
 
   const { themePref, setThemePref, cycleTheme } = useTheme();
   const { toasts, showToast } = useToasts();
   const { devices, refreshDevices } = useDevices(showToast);
+  const macro = useMacro({ showToast, onRecordingStopped: () => setShowMacros(true) });
 
   const takeScreenshot = useCallback(async () => {
     try {
@@ -49,12 +54,29 @@ function App() {
     }
   }, [showToast]);
 
+  const adaptiveRef = useRef<{ frameReceived: () => void; disableAdaptive: () => void }>({
+    frameReceived: () => {},
+    disableAdaptive: () => {},
+  });
+
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const connectedDeviceRef = useRef<Device | null>(null);
+  const scheduleReconnectRef = useRef<((s: Settings) => void) | null>(null);
+
+  const handleCodecFallback = useCallback((codec: string) => {
+    const next = { ...settingsRef.current, video_codec: codec };
+    setSettings(next);
+    if (connectedDeviceRef.current) scheduleReconnectRef.current?.(next);
+  }, []);
+
   const {
     screen,
     connectedDevice,
     connectingSerial,
     deviceSize,
     canvasRef,
+    decoderRef,
     isMouseDown,
     muted,
     recording,
@@ -73,12 +95,35 @@ function App() {
     takeScreenshot,
     setShowSettings: (fn) => setShowSettings(fn),
     setThemePref: (fn) => setThemePref(fn),
+    onFrameReceived: () => adaptiveRef.current.frameReceived(),
+    onCodecFallback: handleCodecFallback,
+    onRecordEvent: macro.recordEvent,
   });
+
+  scheduleReconnectRef.current = scheduleReconnect;
+  connectedDeviceRef.current = connectedDevice;
+
+  const adaptive = useAdaptiveBitrate({
+    enabled: settings.adaptive,
+    decoder: decoderRef,
+    currentSettings: settings,
+    onTierChange: (newSettings) => {
+      setSettings(newSettings);
+      setActivePreset("");
+      if (connectedDevice) scheduleReconnect(newSettings);
+    },
+  });
+
+  adaptiveRef.current = adaptive;
 
   const updateSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     const next = { ...settings, [key]: value };
+    if (key !== "audio" && key !== "adaptive") {
+      next.adaptive = false;
+      adaptive.disableAdaptive();
+    }
     setSettings(next);
-    if (key !== "audio") setActivePreset("");
+    if (key !== "audio" && key !== "adaptive") setActivePreset("");
     if (connectedDevice) scheduleReconnect(next);
   };
 
@@ -86,6 +131,7 @@ function App() {
     const next = { ...PRESETS[name], audio: settings.audio };
     setSettings(next);
     setActivePreset(name);
+    adaptive.disableAdaptive();
     if (connectedDevice) scheduleReconnect(next);
   };
 
@@ -103,7 +149,12 @@ function App() {
     { id: "recents", label: "Recent Apps", keys: [MOD, "R"], key: "r", section: "Device", action: () => pressButton("recents") },
     { id: "power", label: "Power Button", keys: [MOD, "P"], key: "p", section: "Device", action: () => pressButton("power") },
     { id: "cmdbar", label: "Command Bar", keys: [MOD, "K"], key: "k", section: "Actions", action: () => setShowCommandBar((s) => !s) },
-  ], [muted, recording, setMuted, toggleRecording, pressButton, takeScreenshot, cycleTheme, disconnect]);
+    { id: "macro-toggle", label: macro.macroRecording ? "Stop Macro Recording" : "Record Macro", keys: [MOD, "⇧", "M"], key: "m", shift: true, section: "Macros", action: macro.toggleRecording },
+    { id: "macro-play", label: "Play Last Macro", keys: [MOD, "⇧", "P"], key: "p", shift: true, section: "Macros", action: () => { if (macro.macros.length > 0) macro.playMacro(macro.macros[macro.macros.length - 1].name); } },
+    { id: "macro-manage", label: "Manage Macros", keys: [MOD, "⇧", "L"], key: "l", shift: true, section: "Macros", action: () => setShowMacros(true) },
+    { id: "macro-export", label: "Export All Macros", keys: [MOD, "⇧", "E"], key: "e", shift: true, section: "Macros", action: macro.exportAllMacros },
+    { id: "macro-import", label: "Import Macros", keys: [MOD, "⇧", "I"], key: "i", shift: true, section: "Macros", action: macro.importMacros },
+  ], [muted, recording, setMuted, toggleRecording, pressButton, takeScreenshot, cycleTheme, disconnect, macro.macroRecording, macro.toggleRecording, macro.macros, macro.playMacro, macro.exportAllMacros, macro.importMacros]);
 
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
@@ -136,7 +187,26 @@ function App() {
 
   return (
     <>
-      {screen === "welcome" ? (
+      {showMacros ? (
+        <MacrosScreen
+          macros={macro.macros}
+          macrosDir={macro.macrosDir}
+          playingMacro={macro.playingMacro}
+          onBack={() => setShowMacros(false)}
+          onPlay={(name) => {
+            setShowMacros(false);
+            setTimeout(() => macro.playMacro(name), 500);
+          }}
+          onDelete={macro.deleteMacro}
+          onRename={macro.renameMacro}
+          onReorder={macro.reorderMacros}
+          onExport={macro.exportMacro}
+          onExportAll={macro.exportAllMacros}
+          onImport={macro.importMacros}
+          onSetDir={macro.setMacrosDir}
+          showToast={showToast}
+        />
+      ) : screen === "welcome" ? (
         <WelcomeScreen
           devices={devices}
           connectingSerial={connectingSerial}
@@ -154,7 +224,10 @@ function App() {
           canvasRef={canvasRef}
           isMouseDown={isMouseDown}
           recording={recording}
+          macroRecording={macro.macroRecording}
+          adaptiveInfo={settings.adaptive ? { enabled: true, tierName: adaptive.metrics.tierName, fps: adaptive.metrics.fps } : undefined}
           onToggleRecording={toggleRecording}
+          onToggleMacroRecording={macro.toggleRecording}
           onPressButton={pressButton}
           onTakeScreenshot={takeScreenshot}
           onToggleSettings={() => setShowSettings((s) => !s)}

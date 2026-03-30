@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&display=swap');
 
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+input, textarea { user-select: text; -webkit-user-select: text; }
 
 :root {
   --font: 'Google Sans', -apple-system, sans-serif;
@@ -260,6 +261,57 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: default;
+}
+
+.device-nickname-input {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font);
+  line-height: 1.2;
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 1px 4px;
+  outline: none;
+  width: 100%;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  animation: fade-in 0.1s ease-out;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.context-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
 }
 
 .device-card-serial {
@@ -328,6 +380,7 @@ body {
 .device-wifi-toggle.active {
   opacity: 1;
   color: var(--accent);
+  filter: drop-shadow(0 0 4px var(--accent-glow-strong));
 }
 
 .device-wifi-toggle.active:hover {
@@ -345,6 +398,9 @@ body {
   background: var(--surface);
   border: 1px dashed var(--border);
   border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .device-empty svg {
@@ -356,9 +412,16 @@ body {
 }
 
 .device-empty p {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-3);
   line-height: 1.5;
+}
+
+.device-empty p.device-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 2px;
 }
 
 .welcome-footer {
@@ -656,6 +719,40 @@ body {
 .recording-stop svg {
   width: 12px;
   height: 12px;
+}
+
+.macro-recording-bar {
+  bottom: 52px;
+}
+
+.macro-rec-icon {
+  color: #f90;
+  flex-shrink: 0;
+  animation: recording-pulse 1s ease-in-out infinite;
+}
+
+.macro-recording-bar .recording-stop {
+  background: #f90;
+}
+
+.macro-recording-bar .recording-stop:hover {
+  background: #e80;
+}
+
+/* ===== Adaptive Indicator ===== */
+.adaptive-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border-radius: 6px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  z-index: 5;
+  pointer-events: none;
 }
 
 /* ===== Dialog (Settings Panel) ===== */
@@ -1356,4 +1453,250 @@ body {
   line-height: 1.5;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* ===== Macros Screen ===== */
+.toolbar-actions-split {
+  justify-content: space-between;
+  width: 100%;
+  padding-left: 78px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.macros-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.macros-dir-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.6;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.macros-dir-bar svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.macro-card {
+  cursor: default;
+  padding: 10px;
+}
+
+.macro-card .device-card-info {
+  gap: 3px;
+  display: flex;
+  flex-direction: column;
+}
+
+.macro-card .device-card-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.macro-item-icon {
+  flex-shrink: 0;
+  color: currentColor;
+  width: 16px;
+  height: 16px;
+}
+
+.macros-empty-import {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 7px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.macros-empty-import:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.macro-play-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.macro-play-cancel {
+  padding: 7px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.macro-play-cancel:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.macro-card:hover {
+  opacity: 1;
+}
+
+.macro-card.playing {
+  background: var(--accent-glow);
+}
+
+.macro-reorder {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.macro-reorder-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 14px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0;
+  transition: all 0.1s;
+}
+
+.macro-reorder-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.macro-reorder-btn:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.macro-reorder-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.macro-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.macro-edit-input {
+  flex: 1;
+  padding: 3px 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+}
+
+.macro-edit-confirm,
+.macro-edit-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.macro-edit-confirm {
+  color: var(--success);
+}
+
+.macro-edit-cancel {
+  color: var(--text-3);
+}
+
+.macro-edit-confirm svg,
+.macro-edit-cancel svg {
+  width: 14px;
+  height: 14px;
+}
+
+.macro-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.macro-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.1s;
+}
+
+.macro-action-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.macro-action-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.macro-action-btn.play {
+  color: var(--accent);
+}
+
+.macro-action-btn.play:hover:not(:disabled) {
+  background: var(--accent-glow);
+}
+
+.macro-action-btn.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.macro-action-btn svg {
+  width: 15px;
+  height: 15px;
 }

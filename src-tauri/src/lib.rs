@@ -11,6 +11,7 @@ use tauri::{Emitter, Manager};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .setup(|app| {
             if let Ok(dir) = app.path().resource_dir() {
@@ -59,6 +60,15 @@ pub fn run() {
             commands::take_screenshot,
             commands::press_button,
             commands::set_muted,
+            commands::wake_screen,
+            commands::play_macro,
+            commands::get_default_macros_dir,
+            commands::list_macro_files,
+            commands::load_macro_file,
+            commands::save_macro_file,
+            commands::delete_macro_file,
+            commands::rename_macro_file,
+            commands::save_macros_order,
             commands::wifi_connect,
             commands::wifi_disconnect,
             commands::wifi_enable,

@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import type { Device, Settings, FrameEvent, Screen } from "../types";
+import type { Device, Settings, FrameEvent, Screen, MacroEvent } from "../types";
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -19,6 +19,9 @@ interface UseConnectionOptions {
   takeScreenshot: () => void;
   setShowSettings: (fn: (s: boolean) => boolean) => void;
   setThemePref: (fn: (p: "light" | "dark" | "auto") => "light" | "dark" | "auto") => void;
+  onFrameReceived?: () => void;
+  onCodecFallback?: (codec: string) => void;
+  onRecordEvent?: (event: MacroEvent) => void;
 }
 
 export function useConnection(opts: UseConnectionOptions) {
@@ -74,6 +77,7 @@ export function useConnection(opts: UseConnectionOptions) {
           const descBytes = b64ToBytes(msg.data.description);
           const decoder = new VideoDecoder({
             output: (frame: VideoFrame) => {
+              opts.onFrameReceived?.();
               if (pendingFrame.current) pendingFrame.current.close();
               pendingFrame.current = frame;
               if (!rafId.current) {
@@ -102,8 +106,15 @@ export function useConnection(opts: UseConnectionOptions) {
             description: descBytes.buffer,
             hardwareAcceleration: "prefer-hardware",
           };
-          decoder.configure(config);
-          decoderRef.current = decoder;
+          VideoDecoder.isConfigSupported(config).then((result) => {
+            if (!result.supported) {
+              showToast("H.265 not supported on this platform, falling back to H.264", "info");
+              opts.onCodecFallback?.("h264");
+              return;
+            }
+            decoder.configure(config);
+            decoderRef.current = decoder;
+          });
         } else if (msg.event === "packet") {
           const decoder = decoderRef.current;
           if (!decoder || decoder.state !== "configured") return;
@@ -123,10 +134,11 @@ export function useConnection(opts: UseConnectionOptions) {
         }
       };
 
+      const { adaptive: _, ...streamSettings } = s;
       const [width, height] = await invoke<[number, number]>("connect_device", {
         serial: device.serial,
         onFrame: channel,
-        settings: s,
+        settings: streamSettings,
       });
       setDeviceSize({ width, height });
       setConnectedDevice(device);
@@ -200,6 +212,7 @@ export function useConnection(opts: UseConnectionOptions) {
   }, [showToast]);
 
   const pressButton = useCallback(async (button: string) => {
+    opts.onRecordEvent?.({ type: "button", button });
     try { await invoke("press_button", { button }); } catch {}
   }, []);
 
@@ -210,6 +223,7 @@ export function useConnection(opts: UseConnectionOptions) {
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
+    opts.onRecordEvent?.({ type: "touch", action, x, y });
     try { await invoke("send_touch", { action, x, y }); } catch {}
   };
 
@@ -221,6 +235,7 @@ export function useConnection(opts: UseConnectionOptions) {
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
     const dy = e.deltaY > 0 ? -1 : 1;
+    opts.onRecordEvent?.({ type: "scroll", x, y, dx: 0, dy });
     try { await invoke("send_scroll", { x, y, dx: 0, dy }); } catch {}
   };
 
@@ -228,6 +243,7 @@ export function useConnection(opts: UseConnectionOptions) {
     if (!connectedDevice) return;
     e.preventDefault();
     if (e.key.length === 1) {
+      opts.onRecordEvent?.({ type: "text", text: e.key });
       try { await invoke("send_text", { text: e.key }); } catch {}
     } else {
       const keyMap: Record<string, number> = {
@@ -237,6 +253,7 @@ export function useConnection(opts: UseConnectionOptions) {
       };
       const keycode = keyMap[e.key];
       if (keycode) {
+        opts.onRecordEvent?.({ type: "key", keycode, action: "down" });
         try {
           await invoke("send_key", { keycode, action: "down" });
           await invoke("send_key", { keycode, action: "up" });
@@ -269,6 +286,7 @@ export function useConnection(opts: UseConnectionOptions) {
     connectingSerial,
     deviceSize,
     canvasRef,
+    decoderRef,
     isMouseDown,
     muted,
     recording,

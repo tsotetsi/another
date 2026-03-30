@@ -123,63 +123,65 @@ export function SettingsDialog({
           <div className="settings-group">
             <div className="settings-group-title">Video</div>
 
-            <div className="setting-row">
-              <span className="setting-label">Resolution</span>
-              <Select.Root value={settings.max_size} onValueChange={(val) => onUpdateSetting("max_size", val as number)}>
-                <Select.Trigger className="select-trigger">
-                  <Select.Value>{RESOLUTION_OPTIONS.find((o) => o.value === settings.max_size)?.label}</Select.Value>
-                  <ChevronUpDownIcon className="select-icon" />
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Positioner className="select-positioner" sideOffset={4}>
-                    <Select.Popup className="select-popup">
-                      {RESOLUTION_OPTIONS.map((o) => (
-                        <Select.Item key={o.value} value={o.value} className="select-item">
-                          <Select.ItemIndicator className="select-item-indicator"><CheckIcon /></Select.ItemIndicator>
-                          <Select.ItemText>{o.label}</Select.ItemText>
-                        </Select.Item>
-                      ))}
-                    </Select.Popup>
-                  </Select.Positioner>
-                </Select.Portal>
-              </Select.Root>
-            </div>
+            <div style={{ opacity: settings.adaptive ? 0.5 : 1, pointerEvents: settings.adaptive ? 'none' : 'auto' }}>
+              <div className="setting-row">
+                <span className="setting-label">Resolution</span>
+                <Select.Root value={settings.max_size} onValueChange={(val) => onUpdateSetting("max_size", val as number)}>
+                  <Select.Trigger className="select-trigger">
+                    <Select.Value>{RESOLUTION_OPTIONS.find((o) => o.value === settings.max_size)?.label}</Select.Value>
+                    <ChevronUpDownIcon className="select-icon" />
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Positioner className="select-positioner" sideOffset={4}>
+                      <Select.Popup className="select-popup">
+                        {RESOLUTION_OPTIONS.map((o) => (
+                          <Select.Item key={o.value} value={o.value} className="select-item">
+                            <Select.ItemIndicator className="select-item-indicator"><CheckIcon /></Select.ItemIndicator>
+                            <Select.ItemText>{o.label}</Select.ItemText>
+                          </Select.Item>
+                        ))}
+                      </Select.Popup>
+                    </Select.Positioner>
+                  </Select.Portal>
+                </Select.Root>
+              </div>
 
-            <div className="setting-row">
-              <span className="setting-label">Max FPS</span>
-              <span className="setting-value">{settings.max_fps}</span>
-            </div>
-            <Slider.Root
-              className="slider-root"
-              value={settings.max_fps}
-              onValueChange={(val) => onUpdateSetting("max_fps", val as number)}
-              min={15} max={120} step={5}
-            >
-              <Slider.Control className="slider-control">
-                <Slider.Track className="slider-track">
-                  <Slider.Indicator className="slider-indicator" />
-                  <Slider.Thumb className="slider-thumb" />
-                </Slider.Track>
-              </Slider.Control>
-            </Slider.Root>
+              <div className="setting-row">
+                <span className="setting-label">Max FPS</span>
+                <span className="setting-value">{settings.max_fps}</span>
+              </div>
+              <Slider.Root
+                className="slider-root"
+                value={settings.max_fps}
+                onValueChange={(val) => onUpdateSetting("max_fps", val as number)}
+                min={15} max={120} step={5}
+              >
+                <Slider.Control className="slider-control">
+                  <Slider.Track className="slider-track">
+                    <Slider.Indicator className="slider-indicator" />
+                    <Slider.Thumb className="slider-thumb" />
+                  </Slider.Track>
+                </Slider.Control>
+              </Slider.Root>
 
-            <div className="setting-row" style={{ marginTop: 12 }}>
-              <span className="setting-label">Bitrate</span>
-              <span className="setting-value">{(settings.video_bit_rate / 1000000).toFixed(0)} Mbps</span>
+              <div className="setting-row" style={{ marginTop: 12 }}>
+                <span className="setting-label">Bitrate</span>
+                <span className="setting-value">{(settings.video_bit_rate / 1000000).toFixed(0)} Mbps</span>
+              </div>
+              <Slider.Root
+                className="slider-root"
+                value={settings.video_bit_rate}
+                onValueChange={(val) => onUpdateSetting("video_bit_rate", val as number)}
+                min={1000000} max={32000000} step={1000000}
+              >
+                <Slider.Control className="slider-control">
+                  <Slider.Track className="slider-track">
+                    <Slider.Indicator className="slider-indicator" />
+                    <Slider.Thumb className="slider-thumb" />
+                  </Slider.Track>
+                </Slider.Control>
+              </Slider.Root>
             </div>
-            <Slider.Root
-              className="slider-root"
-              value={settings.video_bit_rate}
-              onValueChange={(val) => onUpdateSetting("video_bit_rate", val as number)}
-              min={1000000} max={32000000} step={1000000}
-            >
-              <Slider.Control className="slider-control">
-                <Slider.Track className="slider-track">
-                  <Slider.Indicator className="slider-indicator" />
-                  <Slider.Thumb className="slider-thumb" />
-                </Slider.Track>
-              </Slider.Control>
-            </Slider.Root>
 
             <div className="setting-row" style={{ marginTop: 12 }}>
               <span className="setting-label">Codec</span>
@@ -202,6 +204,18 @@ export function SettingsDialog({
                 </Select.Portal>
               </Select.Root>
             </div>
+
+            <div className="setting-row" style={{ marginTop: 12 }}>
+              <span className="setting-label">Adaptive Quality</span>
+              <Switch.Root
+                className="switch-root"
+                checked={settings.adaptive}
+                onCheckedChange={(checked) => onUpdateSetting("adaptive", checked)}
+              >
+                <Switch.Thumb className="switch-thumb" />
+              </Switch.Root>
+            </div>
+            <div className="setting-hint">Automatically adjusts quality based on network conditions</div>
           </div>
 
           <div className="settings-group">

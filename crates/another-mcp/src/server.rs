@@ -1,4 +1,5 @@
-use another_core::{adb, control, scrcpy};
+use another_core::macro_engine::{self, MacroEvent, MacroRecorder};
+use another_core::{adb, accessibility, control, scrcpy};
 use another_core::scrcpy::StreamSettings;
 use base64::Engine;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -7,6 +8,7 @@ use rmcp::model::CallToolResult;
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -24,6 +26,8 @@ struct Session {
 pub struct AnotherMcp {
     scrcpy_server_path: Option<String>,
     session: Arc<Mutex<Option<Session>>>,
+    macros: Arc<Mutex<HashMap<String, macro_engine::Macro>>>,
+    recorder: Arc<Mutex<Option<MacroRecorder>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -123,12 +127,42 @@ pub struct LaunchAppParams {
     pub package: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindOnScreenParams {
+    #[schemars(description = "Search by text content (case-insensitive substring match)")]
+    pub text: Option<String>,
+    #[schemars(description = "Search by content description (case-insensitive substring match)")]
+    pub content_desc: Option<String>,
+    #[schemars(description = "Search by resource ID (case-insensitive substring match)")]
+    pub resource_id: Option<String>,
+    #[schemars(description = "Search by class name, e.g. 'Button', 'EditText', 'TextView'")]
+    pub class_name: Option<String>,
+    #[schemars(description = "Only return clickable elements")]
+    pub clickable_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MacroNameParams {
+    #[schemars(description = "Name of the macro")]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MacroPlayParams {
+    #[schemars(description = "Name of the macro to play")]
+    pub name: String,
+    #[schemars(description = "Number of times to repeat (default: 1)")]
+    pub repeat: Option<u32>,
+}
+
 impl AnotherMcp {
     pub fn new(scrcpy_server_path: Option<String>) -> Self {
         let tool_router = Self::tool_router();
         Self {
             scrcpy_server_path,
             session: Arc::new(Mutex::new(None)),
+            macros: Arc::new(Mutex::new(HashMap::new())),
+            recorder: Arc::new(Mutex::new(None)),
             tool_router,
         }
     }
@@ -152,6 +186,31 @@ impl AnotherMcp {
         }
 
         Err("scrcpy-server not found. Pass --scrcpy-server <path> or set SCRCPY_SERVER_PATH".into())
+    }
+
+    async fn maybe_record(&self, event: MacroEvent) {
+        if let Some(ref mut r) = *self.recorder.lock().await {
+            r.record(event);
+        }
+    }
+
+    async fn get_ui_elements(
+        &self,
+    ) -> Result<(Vec<accessibility::UiElement>, u32, u32), String> {
+        let (serial, sw, sh) = {
+            let session = self.session.lock().await;
+            let s = session.as_ref().ok_or("No device connected")?;
+            (s.device_serial.clone(), s.screen_width, s.screen_height)
+        };
+
+        let xml = adb::dump_ui_hierarchy(&serial)
+            .await
+            .map_err(|e| format!("Error: {}", e))?;
+
+        let elements = accessibility::parse_ui_hierarchy(&xml, sw, sh)
+            .map_err(|e| format!("Error parsing UI hierarchy: {}", e))?;
+
+        Ok((elements, sw, sh))
     }
 }
 
@@ -272,86 +331,115 @@ impl AnotherMcp {
     #[tool(description = "Press a device button (home, back, recents, power, volume_up, volume_down)")]
     async fn another_press_button(&self, params: Parameters<ButtonParams>) -> String {
         let params = params.0;
-        let session = self.session.lock().await;
-        let session = match session.as_ref() {
-            Some(s) => s,
-            None => return "No device connected".to_string(),
-        };
-        let keycode = match params.button.as_str() {
-            "home" => control::KEYCODE_HOME,
-            "back" => control::KEYCODE_BACK,
-            "recents" => control::KEYCODE_APP_SWITCH,
-            "power" => control::KEYCODE_POWER,
-            "volume_up" => control::KEYCODE_VOLUME_UP,
-            "volume_down" => control::KEYCODE_VOLUME_DOWN,
-            _ => return format!("Unknown button: {}", params.button),
-        };
-        if let Err(e) = control::inject_keycode(&session.control_socket, "down", keycode, 0, 0).await {
-            return format!("Error: {}", e);
+        {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            let keycode = match params.button.as_str() {
+                "home" => control::KEYCODE_HOME,
+                "back" => control::KEYCODE_BACK,
+                "recents" => control::KEYCODE_APP_SWITCH,
+                "power" => control::KEYCODE_POWER,
+                "volume_up" => control::KEYCODE_VOLUME_UP,
+                "volume_down" => control::KEYCODE_VOLUME_DOWN,
+                _ => return format!("Unknown button: {}", params.button),
+            };
+            if let Err(e) = control::inject_keycode(&session.control_socket, "down", keycode, 0, 0).await {
+                return format!("Error: {}", e);
+            }
+            if let Err(e) = control::inject_keycode(&session.control_socket, "up", keycode, 0, 0).await {
+                return format!("Error: {}", e);
+            }
         }
-        if let Err(e) = control::inject_keycode(&session.control_socket, "up", keycode, 0, 0).await {
-            return format!("Error: {}", e);
-        }
+        self.maybe_record(MacroEvent::Button {
+            button: params.button.clone(),
+        })
+        .await;
         format!("Pressed {}", params.button)
     }
 
     #[tool(description = "Type text on the connected device")]
     async fn another_send_text(&self, params: Parameters<TextParams>) -> String {
         let params = params.0;
-        let session = self.session.lock().await;
-        let session = match session.as_ref() {
-            Some(s) => s,
-            None => return "No device connected".to_string(),
-        };
-        if let Err(e) = control::inject_text(&session.control_socket, &params.text).await {
-            return format!("Error: {}", e);
+        {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            if let Err(e) = control::inject_text(&session.control_socket, &params.text).await {
+                return format!("Error: {}", e);
+            }
         }
+        self.maybe_record(MacroEvent::Text {
+            text: params.text.clone(),
+        })
+        .await;
         format!("Typed: {}", params.text)
     }
 
     #[tool(description = "Send a touch event (down/up/move) at normalized coordinates (0.0-1.0)")]
     async fn another_send_touch(&self, params: Parameters<TouchParams>) -> String {
         let params = params.0;
-        let session = self.session.lock().await;
-        let session = match session.as_ref() {
-            Some(s) => s,
-            None => return "No device connected".to_string(),
-        };
-        let px = (params.x * session.screen_width as f64) as u32;
-        let py = (params.y * session.screen_height as f64) as u32;
-        if let Err(e) = control::inject_touch(
-            &session.control_socket,
-            &params.action,
-            px, py,
-            session.screen_width as u16,
-            session.screen_height as u16,
-        ).await {
-            return format!("Error: {}", e);
+        {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            let px = (params.x * session.screen_width as f64) as u32;
+            let py = (params.y * session.screen_height as f64) as u32;
+            if let Err(e) = control::inject_touch(
+                &session.control_socket,
+                &params.action,
+                px, py,
+                session.screen_width as u16,
+                session.screen_height as u16,
+            ).await {
+                return format!("Error: {}", e);
+            }
         }
+        self.maybe_record(MacroEvent::Touch {
+            action: params.action.clone(),
+            x: params.x,
+            y: params.y,
+        })
+        .await;
         format!("Touch {} at ({:.2}, {:.2})", params.action, params.x, params.y)
     }
 
     #[tool(description = "Send a scroll event at normalized coordinates")]
     async fn another_send_scroll(&self, params: Parameters<ScrollParams>) -> String {
         let params = params.0;
-        let session = self.session.lock().await;
-        let session = match session.as_ref() {
-            Some(s) => s,
-            None => return "No device connected".to_string(),
-        };
-        let px = (params.x * session.screen_width as f64) as u32;
-        let py = (params.y * session.screen_height as f64) as u32;
-        let sx = (params.dx * 120.0) as i16;
-        let sy = (params.dy * 120.0) as i16;
-        if let Err(e) = control::inject_scroll(
-            &session.control_socket,
-            px, py,
-            session.screen_width as u16,
-            session.screen_height as u16,
-            sx, sy,
-        ).await {
-            return format!("Error: {}", e);
+        {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            let px = (params.x * session.screen_width as f64) as u32;
+            let py = (params.y * session.screen_height as f64) as u32;
+            let sx = (params.dx * 120.0) as i16;
+            let sy = (params.dy * 120.0) as i16;
+            if let Err(e) = control::inject_scroll(
+                &session.control_socket,
+                px, py,
+                session.screen_width as u16,
+                session.screen_height as u16,
+                sx, sy,
+            ).await {
+                return format!("Error: {}", e);
+            }
         }
+        self.maybe_record(MacroEvent::Scroll {
+            x: params.x,
+            y: params.y,
+            dx: params.dx,
+            dy: params.dy,
+        })
+        .await;
         format!("Scrolled at ({:.2}, {:.2}) by ({:.2}, {:.2})", params.x, params.y, params.dx, params.dy)
     }
 
@@ -439,13 +527,15 @@ impl AnotherMcp {
     #[tool(description = "Perform a swipe gesture from one point to another at normalized coordinates (0.0-1.0)")]
     async fn another_swipe(&self, params: Parameters<SwipeParams>) -> String {
         let params = params.0;
-        let session = self.session.lock().await;
-        let session = match session.as_ref() {
-            Some(s) => s,
-            None => return "No device connected".to_string(),
+        let (socket, w, h) = {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            (session.control_socket.clone(), session.screen_width, session.screen_height)
         };
-        let w = session.screen_width;
-        let h = session.screen_height;
+
         let from_px = (params.from_x * w as f64) as u32;
         let from_py = (params.from_y * h as f64) as u32;
         let to_px = (params.to_x * w as f64) as u32;
@@ -453,7 +543,7 @@ impl AnotherMcp {
         let steps = params.duration_ms.unwrap_or(300) / 16;
 
         if let Err(e) = control::inject_touch(
-            &session.control_socket, "down",
+            &socket, "down",
             from_px, from_py, w as u16, h as u16,
         ).await {
             return format!("Error: {}", e);
@@ -465,7 +555,7 @@ impl AnotherMcp {
             let cy = from_py as f64 + (to_py as f64 - from_py as f64) * t;
             tokio::time::sleep(tokio::time::Duration::from_millis(16)).await;
             if let Err(e) = control::inject_touch(
-                &session.control_socket, "move",
+                &socket, "move",
                 cx as u32, cy as u32, w as u16, h as u16,
             ).await {
                 return format!("Error: {}", e);
@@ -473,7 +563,7 @@ impl AnotherMcp {
         }
 
         if let Err(e) = control::inject_touch(
-            &session.control_socket, "up",
+            &socket, "up",
             to_px, to_py, w as u16, h as u16,
         ).await {
             return format!("Error: {}", e);
@@ -540,6 +630,134 @@ impl AnotherMcp {
             Err(e) => format!("Error: {}", e),
         }
     }
+
+    #[tool(description = "Get the UI accessibility tree of the current screen. Returns a hierarchical text representation of all UI elements with their properties and normalized coordinates (0.0-1.0). Use this to understand the screen layout before interacting. Coordinates can be used directly with send_touch.")]
+    async fn another_get_ui_tree(&self) -> String {
+        match self.get_ui_elements().await {
+            Ok((elements, sw, sh)) => {
+                let tree = accessibility::format_tree(&elements, 0);
+                format!("Screen: {}x{}\n{}", sw, sh, tree)
+            }
+            Err(e) => e,
+        }
+    }
+
+    #[tool(description = "Search for UI elements on screen by text, content description, resource ID, or class name. Returns matching elements with normalized coordinates ready to use with send_touch. Much more reliable than screenshot-based element discovery.")]
+    async fn another_find_on_screen(&self, params: Parameters<FindOnScreenParams>) -> String {
+        let p = params.0;
+        if p.text.is_none()
+            && p.content_desc.is_none()
+            && p.resource_id.is_none()
+            && p.class_name.is_none()
+        {
+            return "Provide at least one search parameter (text, content_desc, resource_id, or class_name)".to_string();
+        }
+
+        let elements = match self.get_ui_elements().await {
+            Ok((e, _, _)) => e,
+            Err(e) => return e,
+        };
+
+        let found = accessibility::find_elements(
+            &elements,
+            p.text.as_deref(),
+            p.content_desc.as_deref(),
+            p.resource_id.as_deref(),
+            p.class_name.as_deref(),
+            p.clickable_only.unwrap_or(false),
+        );
+
+        if found.is_empty() {
+            "No elements found matching the search criteria".to_string()
+        } else {
+            serde_json::to_string_pretty(&found).unwrap_or_else(|e| format!("Error: {}", e))
+        }
+    }
+
+    #[tool(description = "Start recording a macro. All subsequent actions (touch, text, scroll, button presses) will be recorded with timing until you call macro_stop.")]
+    async fn another_macro_record(&self, params: Parameters<MacroNameParams>) -> String {
+        let mut recorder = self.recorder.lock().await;
+        if recorder.is_some() {
+            return "Already recording. Call macro_stop first.".to_string();
+        }
+        *recorder = Some(MacroRecorder::new(params.0.name.clone()));
+        format!("Recording macro '{}'", params.0.name)
+    }
+
+    #[tool(description = "Stop recording and save the current macro")]
+    async fn another_macro_stop(&self) -> String {
+        let mut recorder = self.recorder.lock().await;
+        let r = match recorder.take() {
+            Some(r) => r,
+            None => return "No macro is being recorded".to_string(),
+        };
+        let m = r.finish();
+        let name = m.name.clone();
+        let count = m.events.len();
+        self.macros.lock().await.insert(name.clone(), m);
+        format!("Saved macro '{}' with {} events", name, count)
+    }
+
+    #[tool(description = "Play a recorded macro by name. Replays all recorded actions with original timing.")]
+    async fn another_macro_play(&self, params: Parameters<MacroPlayParams>) -> String {
+        let m = {
+            let macros = self.macros.lock().await;
+            match macros.get(&params.0.name) {
+                Some(m) => m.clone(),
+                None => return format!("Macro '{}' not found", params.0.name),
+            }
+        };
+
+        let (socket, sw, sh) = {
+            let session = self.session.lock().await;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return "No device connected".to_string(),
+            };
+            (
+                session.control_socket.clone(),
+                session.screen_width,
+                session.screen_height,
+            )
+        };
+
+        let repeat = params.0.repeat.unwrap_or(1).max(1);
+        for i in 0..repeat {
+            if let Err(e) = macro_engine::play_events(&m.events, &socket, sw, sh).await {
+                return format!("Playback error on repeat {}: {}", i + 1, e);
+            }
+        }
+
+        format!(
+            "Played macro '{}' ({} events, {} time(s))",
+            params.0.name,
+            m.events.len(),
+            repeat
+        )
+    }
+
+    #[tool(description = "List all recorded macros")]
+    async fn another_macro_list(&self) -> String {
+        let macros = self.macros.lock().await;
+        if macros.is_empty() {
+            "No macros recorded".to_string()
+        } else {
+            macros
+                .iter()
+                .map(|(name, m)| format!("{} ({} events)", name, m.events.len()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }
+
+    #[tool(description = "Delete a recorded macro")]
+    async fn another_macro_delete(&self, params: Parameters<MacroNameParams>) -> String {
+        if self.macros.lock().await.remove(&params.0.name).is_some() {
+            format!("Deleted macro '{}'", params.0.name)
+        } else {
+            format!("Macro '{}' not found", params.0.name)
+        }
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -550,7 +768,9 @@ impl ServerHandler for AnotherMcp {
         rmcp::model::ServerInfo::new(caps).with_instructions(
             "Android device control server. Use list_devices to find devices, \
              connect_device to establish a session, then control the device with \
-             press_button, send_text, send_touch, send_scroll, and take_screenshot."
+             press_button, send_text, send_touch, send_scroll, and take_screenshot. \
+             Use get_ui_tree and find_on_screen for reliable UI element discovery. \
+             Use macro_record/macro_stop/macro_play for automation recording and playback."
                 .to_string(),
         )
     }

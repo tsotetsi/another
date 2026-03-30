@@ -171,6 +171,20 @@ pub async fn exec_out_screencap(serial: &str) -> Result<Vec<u8>> {
     run_adb(&["-s", serial, "exec-out", "screencap", "-p"]).await
 }
 
+pub async fn dump_ui_hierarchy(serial: &str) -> Result<String> {
+    let output =
+        run_adb_text(&["-s", serial, "exec-out", "uiautomator", "dump", "/dev/tty"]).await?;
+
+    if let Some(end) = output.rfind("</hierarchy>") {
+        let xml = &output[..end + "</hierarchy>".len()];
+        if let Some(start) = xml.find('<') {
+            return Ok(xml[start..].to_string());
+        }
+    }
+
+    Err(anyhow!("Failed to parse UI hierarchy output"))
+}
+
 pub async fn connect_device(address: &str) -> Result<()> {
     let output = run_adb_text(&["connect", address]).await?;
     if output.contains("connected") || output.contains("already connected") {

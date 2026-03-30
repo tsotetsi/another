@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   DevicePhoneMobileIcon,
@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Dialog } from "@base-ui-components/react/dialog";
 import type { Device, ThemePreference } from "../types";
+import { getDeviceDisplayName, getDeviceNickname, setDeviceNickname } from "../types";
 import appIcon from "../assets/icon.png";
 
 interface WelcomeScreenProps {
@@ -48,6 +49,27 @@ export function WelcomeScreen({
   const [wifiAddress, setWifiAddress] = useState("");
   const [wifiConnecting, setWifiConnecting] = useState(false);
   const [togglingSerial, setTogglingSerial] = useState<string | null>(null);
+  const [editingSerial, setEditingSerial] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; device: Device } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [contextMenu]);
+
+  const handleContextMenu = (e: React.MouseEvent, device: Device) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, device });
+  };
 
   const handleWifiConnect = async () => {
     if (!wifiAddress.trim()) return;
@@ -72,10 +94,16 @@ export function WelcomeScreen({
     try {
       if (isWifiDevice(device.serial)) {
         await invoke("wifi_disconnect", { address: device.serial });
-        showToast(`${device.model} WiFi disconnected`, "info");
+        showToast(`${getDeviceDisplayName(device)} WiFi disconnected`, "info");
+      } else if (device.wifi_available) {
+        const ip = await invoke<string | null>("get_device_ip", { serial: device.serial });
+        if (ip) {
+          await invoke("wifi_disconnect", { address: `${ip}:5555` });
+          showToast(`${getDeviceDisplayName(device)} WiFi disconnected`, "info");
+        }
       } else {
         const addr = await invoke<string>("wifi_enable", { serial: device.serial });
-        showToast(`${device.model} now available at ${addr}`, "info");
+        showToast(`${getDeviceDisplayName(device)} now available at ${addr}`, "info");
       }
       onRefreshDevices();
     } catch (e) {
@@ -127,20 +155,42 @@ export function WelcomeScreen({
               key={d.serial}
               className="device-card"
               onClick={() => !connectingSerial && onConnectDevice(d)}
+              onContextMenu={(e) => handleContextMenu(e, d)}
             >
               <div className="device-card-icon">
-                {isWifiDevice(d.serial) ? <WifiIcon /> : <DevicePhoneMobileIcon />}
+                <DevicePhoneMobileIcon />
               </div>
               <div className="device-card-info">
-                <div className="device-card-name">{d.model}</div>
+                {editingSerial === d.serial ? (
+                  <input
+                    className="device-nickname-input"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => { setDeviceNickname(d.serial, editValue); setEditingSerial(null); }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") { setDeviceNickname(d.serial, editValue); setEditingSerial(null); }
+                      if (e.key === "Escape") setEditingSerial(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    autoFocus
+                  />
+                ) : (
+                  <div
+                    className="device-card-name"
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingSerial(d.serial); setEditValue(getDeviceDisplayName(d)); }}
+                    title="Double-click to rename"
+                  >
+                    {getDeviceDisplayName(d)}
+                  </div>
+                )}
                 <div className="device-card-serial">
-                  {d.wifi_available && <span className="device-wifi-badge">WiFi</span>}
                   {truncateSerial(d.serial)}
                 </div>
               </div>
               <div className="device-card-actions">
                 <button
-                  className={`device-wifi-toggle ${isWifiDevice(d.serial) ? "active" : ""}`}
+                  className={`device-wifi-toggle ${isWifiDevice(d.serial) || d.wifi_available ? "active" : ""}`}
                   title={isWifiDevice(d.serial) ? "Disable WiFi" : "Enable WiFi"}
                   onClick={(e) => handleToggleWifi(e, d)}
                   disabled={togglingSerial === d.serial}
@@ -153,6 +203,50 @@ export function WelcomeScreen({
           ))
         )}
       </div>
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button className="context-menu-item" onClick={() => {
+            onConnectDevice(contextMenu.device);
+            setContextMenu(null);
+          }}>
+            Connect
+          </button>
+          <button className="context-menu-item" onClick={() => {
+            setEditingSerial(contextMenu.device.serial);
+            setEditValue(getDeviceDisplayName(contextMenu.device));
+            setContextMenu(null);
+          }}>
+            Rename
+          </button>
+          {getDeviceNickname(contextMenu.device.serial) && (
+            <button className="context-menu-item" onClick={() => {
+              setDeviceNickname(contextMenu.device.serial, "");
+              setContextMenu(null);
+            }}>
+              Reset Name
+            </button>
+          )}
+          <button className="context-menu-item" onClick={() => {
+            handleToggleWifi({ stopPropagation: () => {} } as React.MouseEvent, contextMenu.device);
+            setContextMenu(null);
+          }}>
+            {isWifiDevice(contextMenu.device.serial) ? "Disable WiFi" : "Enable WiFi"}
+          </button>
+          <div className="context-menu-separator" />
+          <button className="context-menu-item" onClick={() => {
+            navigator.clipboard.writeText(contextMenu.device.serial);
+            showToast("Serial copied", "info");
+            setContextMenu(null);
+          }}>
+            Copy Serial
+          </button>
+        </div>
+      )}
 
       <Dialog.Root open={showWifiDialog} onOpenChange={setShowWifiDialog}>
         <Dialog.Portal>
