@@ -24,7 +24,76 @@ permissions:
   contents: write
 
 jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+    outputs:
+      notes: ${{ steps.ai.outputs.notes || steps.fallback.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get commit log
+        id: commits
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | grep '^v' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            LOG=$(git log --pretty=format:"- %s" --no-merges HEAD)
+          else
+            LOG=$(git log --pretty=format:"- %s" --no-merges "$PREV_TAG"..HEAD)
+          fi
+          if [ -z "$LOG" ]; then
+            LOG="- Bug fixes and improvements"
+          fi
+          {
+            echo "log<<EOFDELIM"
+            echo "$LOG"
+            echo "EOFDELIM"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate AI release notes
+        id: ai
+        if: ${{ secrets.GEMINI_API_KEY != '' }}
+        uses: google-github-actions/run-gemini-cli@v1
+        with:
+          prompt: |
+            You are writing release notes for "Another", an Android screen mirroring and control desktop app.
+            Given these git commits, write concise, user-friendly release notes in markdown.
+            Group changes into sections like "New Features", "Improvements", "Bug Fixes" as needed.
+            Skip merge commits and internal refactors. Keep it short and clear.
+            Do not use em dashes. Do not add any preamble.
+            Start directly with ## What's New
+
+            Commits:
+            ${{ steps.commits.outputs.log }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        continue-on-error: true
+
+      - name: Save AI notes
+        if: steps.ai.outcome == 'success' && steps.ai.outputs.text != ''
+        id: save-ai
+        run: |
+          {
+            echo "notes<<EOFDELIM"
+            echo "${{ steps.ai.outputs.text }}"
+            echo "EOFDELIM"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fallback release notes
+        id: fallback
+        if: steps.ai.outcome != 'success' || steps.ai.outputs.text == ''
+        run: |
+          {
+            echo "notes<<EOFDELIM"
+            echo "## What's New"
+            echo ""
+            echo "${{ steps.commits.outputs.log }}"
+            echo "EOFDELIM"
+          } >> "$GITHUB_OUTPUT"
+
   build-linux:
+    needs: release-notes
     if: >-
       github.event_name == 'push' ||
       inputs.platforms == 'all' ||
@@ -60,14 +129,18 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Another ${{ github.ref_name }}"
-          releaseBody: "See the assets for download links."
+          releaseBody: ${{ needs.release-notes.outputs.notes }}
           releaseDraft: false
           prerelease: false
+          updaterJsonKeepUniversal: true
 
   build-macos:
+    needs: release-notes
     if: >-
       github.event_name == 'push' ||
       inputs.platforms == 'all' ||
@@ -113,15 +186,19 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Another ${{ github.ref_name }}"
-          releaseBody: "See the assets for download links."
+          releaseBody: ${{ needs.release-notes.outputs.notes }}
           releaseDraft: false
           prerelease: false
+          updaterJsonKeepUniversal: true
           args: --target ${{ matrix.arch }}
 
   build-windows:
+    needs: release-notes
     if: >-
       github.event_name == 'push' ||
       inputs.platforms == 'all' ||
@@ -156,9 +233,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Another ${{ github.ref_name }}"
-          releaseBody: "See the assets for download links."
+          releaseBody: ${{ needs.release-notes.outputs.notes }}
           releaseDraft: false
           prerelease: false
+          updaterJsonKeepUniversal: true

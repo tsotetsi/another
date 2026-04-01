@@ -8,6 +8,7 @@ import { useDevices } from "./hooks/useDevices";
 import { useConnection } from "./hooks/useConnection";
 import { useAdaptiveBitrate } from "./hooks/useAdaptiveBitrate";
 import { useMacro } from "./hooks/useMacro";
+import { useUpdater } from "./hooks/useUpdater";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { MirrorScreen } from "./components/MirrorScreen";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -40,6 +41,7 @@ function App() {
   const { toasts, showToast } = useToasts();
   const { devices, refreshDevices } = useDevices(showToast);
   const macro = useMacro({ showToast, onRecordingStopped: () => setShowMacros(true) });
+  const updater = useUpdater(showToast);
 
   const takeScreenshot = useCallback(async () => {
     try {
@@ -55,8 +57,8 @@ function App() {
   }, [showToast]);
 
   const adaptiveRef = useRef<{ frameReceived: () => void; disableAdaptive: () => void }>({
-    frameReceived: () => {},
-    disableAdaptive: () => {},
+    frameReceived: () => { },
+    disableAdaptive: () => { },
   });
 
   const settingsRef = useRef(settings);
@@ -154,7 +156,8 @@ function App() {
     { id: "macro-manage", label: "Manage Macros", keys: [MOD, "⇧", "L"], key: "l", shift: true, section: "Macros", action: () => setShowMacros(true) },
     { id: "macro-export", label: "Export All Macros", keys: [MOD, "⇧", "E"], key: "e", shift: true, section: "Macros", action: macro.exportAllMacros },
     { id: "macro-import", label: "Import Macros", keys: [MOD, "⇧", "I"], key: "i", shift: true, section: "Macros", action: macro.importMacros },
-  ], [muted, recording, setMuted, toggleRecording, pressButton, takeScreenshot, cycleTheme, disconnect, macro.macroRecording, macro.toggleRecording, macro.macros, macro.playMacro, macro.exportAllMacros, macro.importMacros]);
+    { id: "check-updates", label: "Check for Updates", keys: [MOD, "⇧", "U"], key: "u", shift: true, section: "Actions", action: () => updater.checkForUpdates() },
+  ], [muted, recording, setMuted, toggleRecording, pressButton, takeScreenshot, cycleTheme, disconnect, macro.macroRecording, macro.toggleRecording, macro.macros, macro.playMacro, macro.exportAllMacros, macro.importMacros, updater.checkForUpdates]);
 
   const commandsRef = useRef(commands);
   commandsRef.current = commands;
@@ -163,7 +166,7 @@ function App() {
     const mcpEnabled = localStorage.getItem("mcp_enabled") !== "false";
     if (mcpEnabled) {
       const port = parseInt(localStorage.getItem("mcp_port") || "7070", 10);
-      invoke("start_mcp_server", { port }).catch(() => {});
+      invoke("start_mcp_server", { port }).catch(() => { });
     }
   }, []);
 
@@ -229,6 +232,7 @@ function App() {
           onToggleRecording={toggleRecording}
           onToggleMacroRecording={macro.toggleRecording}
           onPressButton={pressButton}
+          onRotateDevice={() => invoke("rotate_device")}
           onTakeScreenshot={takeScreenshot}
           onToggleSettings={() => setShowSettings((s) => !s)}
           onOpenCommandBar={() => setShowCommandBar(true)}

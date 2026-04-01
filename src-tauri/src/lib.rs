@@ -12,10 +12,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::new())
         .setup(|app| {
             if let Ok(dir) = app.path().resource_dir() {
                 another_core::adb::set_resource_dir(dir);
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_decorum::WebviewWindowExt;
+                let main_window = app.get_webview_window("main").unwrap();
+                main_window.create_overlay_titlebar().unwrap();
             }
 
             let device_menu = SubmenuBuilder::new(app, "Device")
@@ -59,6 +68,8 @@ pub fn run() {
             commands::send_scroll,
             commands::take_screenshot,
             commands::press_button,
+            commands::rotate_device,
+            commands::update_screen_size,
             commands::set_muted,
             commands::wake_screen,
             commands::play_macro,

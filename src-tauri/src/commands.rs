@@ -231,6 +231,24 @@ pub async fn press_button(button: String, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
+pub async fn update_screen_size(width: u32, height: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let mut session = state.session.lock().await;
+    let session = session.as_mut().ok_or("Not connected")?;
+    session.screen_width = width;
+    session.screen_height = height;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rotate_device(state: State<'_, AppState>) -> Result<(), String> {
+    let session = state.session.lock().await;
+    let session = session.as_ref().ok_or("Not connected")?;
+    control::rotate_device(&session.control_socket)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn wake_screen(state: State<'_, AppState>) -> Result<(), String> {
     let session = state.session.lock().await;
     let session = session.as_ref().ok_or("Not connected")?;

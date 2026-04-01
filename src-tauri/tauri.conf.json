@@ -19,11 +19,20 @@
         "minWidth": 280,
         "minHeight": 400,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "acceptFirstMouse": true
       }
     ],
     "security": {
       "csp": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Zfinix/another/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMwOUM2QkMzM0RFNDdCRjkKUldUNWUrUTl3MnVjd1Azb0k5Rm9MQXphVGJzaHdRNC9IZVhQazZTN2xUay8wQkdBZjBjL1o3R2kK"
     }
   },
   "bundle": {

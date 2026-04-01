@@ -9,6 +9,8 @@ import {
   Square2StackIcon,
   CommandLineIcon,
   StopIcon,
+  PowerIcon,
+  ArrowPathIcon,
 } from "@heroicons/react/24/outline";
 import type { Device } from "../types";
 import { getDeviceDisplayName } from "../types";
@@ -25,6 +27,7 @@ interface MirrorScreenProps {
   onToggleRecording: () => void;
   onToggleMacroRecording: () => void;
   onPressButton: (button: string) => void;
+  onRotateDevice: () => void;
   onTakeScreenshot: () => void;
   onToggleSettings: () => void;
   onOpenCommandBar: () => void;
@@ -52,6 +55,7 @@ export function MirrorScreen({
   onToggleRecording,
   onToggleMacroRecording,
   onPressButton,
+  onRotateDevice,
   onTakeScreenshot,
   onToggleSettings,
   onOpenCommandBar,
@@ -89,6 +93,7 @@ export function MirrorScreen({
 
   return (
     <div className="another">
+      <div className="mirror-drag-bar" data-tauri-drag-region />
       <div className="titlebar" data-tauri-drag-region>
         <div className="titlebar-info" data-tauri-drag-region>
           <span className="titlebar-device">{getDeviceDisplayName(connectedDevice)}</span>
@@ -104,6 +109,12 @@ export function MirrorScreen({
           </button>
           <button className="titlebar-btn" onClick={() => onPressButton("recents")} title="Recents">
             <Square2StackIcon />
+          </button>
+          <button className="titlebar-btn titlebar-btn-extra" onClick={() => onPressButton("power")} title="Power">
+            <PowerIcon />
+          </button>
+          <button className="titlebar-btn titlebar-btn-extra" onClick={onRotateDevice} title="Rotate">
+            <ArrowPathIcon />
           </button>
         </div>
 

@@ -472,6 +472,13 @@ body {
 }
 
 /* Titlebar */
+.mirror-drag-bar {
+  height: 12px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  background: var(--surface);
+}
+
 .titlebar {
   height: 52px;
   display: flex;
@@ -555,6 +562,12 @@ body {
 .titlebar-btn svg {
   width: 16px;
   height: 16px;
+}
+
+@media (max-width: 520px) {
+  .titlebar-btn-extra {
+    display: none;
+  }
 }
 
 /* Buttons */
@@ -1460,6 +1473,11 @@ body {
   justify-content: space-between;
   width: 100%;
   padding-left: 78px;
+  pointer-events: none;
+}
+
+.toolbar-actions-split > * {
+  pointer-events: auto;
 }
 
 .toolbar-right {
