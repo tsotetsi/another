@@ -10,6 +10,7 @@ const MSG_TYPE_INJECT_TOUCH: u8 = 2;
 const MSG_TYPE_INJECT_SCROLL: u8 = 3;
 #[allow(dead_code)]
 const MSG_TYPE_BACK_OR_SCREEN_ON: u8 = 4;
+const MSG_TYPE_ROTATE_DEVICE: u8 = 11;
 
 pub const KEYCODE_HOME: u32 = 3;
 pub const KEYCODE_BACK: u32 = 4;
@@ -88,6 +89,13 @@ pub async fn inject_text(socket: &Mutex<TcpStream>, text: &str) -> Result<()> {
     WriteBytesExt::write_u32::<BigEndian>(&mut buf, bytes.len() as u32).unwrap();
     std::io::Write::write_all(&mut buf, bytes).unwrap();
 
+    let mut stream = socket.lock().await;
+    stream.write_all(&buf).await?;
+    Ok(())
+}
+
+pub async fn rotate_device(socket: &Mutex<TcpStream>) -> Result<()> {
+    let buf = vec![MSG_TYPE_ROTATE_DEVICE];
     let mut stream = socket.lock().await;
     stream.write_all(&buf).await?;
     Ok(())

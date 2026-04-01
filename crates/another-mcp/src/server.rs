@@ -750,6 +750,19 @@ impl AnotherMcp {
         }
     }
 
+    #[tool(description = "Rotate the device screen orientation")]
+    async fn another_rotate_device(&self) -> String {
+        let session = self.session.lock().await;
+        let session = match session.as_ref() {
+            Some(s) => s,
+            None => return "No device connected".to_string(),
+        };
+        match control::rotate_device(&session.control_socket).await {
+            Ok(_) => "Device rotated".to_string(),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
     #[tool(description = "Delete a recorded macro")]
     async fn another_macro_delete(&self, params: Parameters<MacroNameParams>) -> String {
         if self.macros.lock().await.remove(&params.0.name).is_some() {

@@ -41,6 +41,7 @@ export function useConnection(opts: UseConnectionOptions) {
   const isReconnecting = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunks = useRef<Blob[]>([]);
+  const nativeSize = useRef({ width: 1080, height: 1920 });
 
   const cleanupDecoder = useCallback(() => {
     if (rafId.current) {
@@ -91,7 +92,30 @@ export function useConnection(opts: UseConnectionOptions) {
                   if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) {
                     canvas.width = f.displayWidth;
                     canvas.height = f.displayHeight;
-                    setDeviceSize({ width: f.displayWidth, height: f.displayHeight });
+                    setDeviceSize((prev) => {
+                      if (prev.width === f.displayWidth && prev.height === f.displayHeight) return prev;
+                      const prevLandscape = prev.width > prev.height;
+                      const nowLandscape = f.displayWidth > f.displayHeight;
+                      if (prevLandscape !== nowLandscape) {
+                        nativeSize.current = { width: nativeSize.current.height, height: nativeSize.current.width };
+                      }
+                      invoke("update_screen_size", { width: nativeSize.current.width, height: nativeSize.current.height });
+                      const chromeH = 52;
+                      const aspect = f.displayWidth / f.displayHeight;
+                      const isLandscape = aspect > 1;
+                      let viewW: number, viewH: number;
+                      if (isLandscape) {
+                        const maxViewW = 860;
+                        viewW = maxViewW;
+                        viewH = Math.round(maxViewW / aspect);
+                      } else {
+                        const maxViewH = 860;
+                        viewH = maxViewH;
+                        viewW = Math.round(maxViewH * aspect);
+                      }
+                      getCurrentWindow().setSize(new LogicalSize(Math.max(viewW, 280), viewH + chromeH));
+                      return { width: f.displayWidth, height: f.displayHeight };
+                    });
                   }
                   const ctx = canvas.getContext("2d");
                   if (ctx) ctx.drawImage(f, 0, 0);
@@ -140,6 +164,7 @@ export function useConnection(opts: UseConnectionOptions) {
         onFrame: channel,
         settings: streamSettings,
       });
+      nativeSize.current = { width, height };
       setDeviceSize({ width, height });
       setConnectedDevice(device);
       setScreen("another");
